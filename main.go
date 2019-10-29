@@ -9,12 +9,17 @@ import (
 )
 
 func main() {
-
-	if len(os.Args) < 3 && os.Args[1] != "list" {
-		fmt.Println("Usage: samp-srv {project_name} stop/start/restart/uptime/list/logs")
-		return
+	if len(os.Args) <= 3 {
+		if len(os.Args) == 1 {
+			fmt.Println("Usage: samp-srv {project_name} stop/start/restart/uptime/list/logs")
+			return
+		}
+	} else if len(os.Args) <= 2 {
+		if os.Args[1] != "list" {
+			fmt.Println("Usage: samp-srv {project_name} stop/start/restart/uptime/list/logs")
+			return
+		}
 	}
-
 	var cmd *exec.Cmd
 	var out bytes.Buffer
 	var stderr bytes.Buffer
