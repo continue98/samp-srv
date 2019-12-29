@@ -1,38 +1,36 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
+	"io/ioutil"
+	"log"
+	"math/rand"
 	"os"
 	"os/exec"
 	"regexp"
+	"strings"
+	"time"
 )
 
 func main() {
-	if len(os.Args) <= 3 {
-		if len(os.Args) == 1 {
-			fmt.Println("Usage: samp-srv {project_name} stop/start/restart/uptime/list/logs")
-			return
-		}
-	} else if len(os.Args) <= 2 {
-		if os.Args[1] != "list" {
-			fmt.Println("Usage: samp-srv {project_name} stop/start/restart/uptime/list/logs")
-			return
-		}
-	}
-	var cmd *exec.Cmd
-	var out bytes.Buffer
-	var stderr bytes.Buffer
-
-	var project_name string
 	var commands string
-
-	if os.Args[1] == "list" {
-		commands = os.Args[1]
+	var project_name string
+	if len(os.Args) < 3 {
+		if len(os.Args) == 2 && os.Args[1] == "list" {
+			commands = os.Args[1]
+		} else {
+			fmt.Println("Usage: samp-srv {project_name} stop/start/restart/uptime/list/logs/install")
+			return
+		}
 	} else {
 		project_name = os.Args[1]
 		commands = os.Args[2]
 	}
+	var cmd *exec.Cmd
+	var out bytes.Buffer
+	var stderr bytes.Buffer
 
 	s := fmt.Sprintf(`(?m)^\s+(\d+)[.](%s)\s+\(\d+\/\d+\/\d+\s+\d+\:\d+\:\d+\s+\w+\)`, project_name)
 
@@ -208,5 +206,147 @@ func main() {
 		if count_server == 0 {
 			fmt.Println("Project " + project_name + " not finding process!")
 		}
+	case "install":
+		// curl files.sa-mp.com/samp037svr_R2-1.tar.gz --output /tmp/samp037svr_R2-1.tar.gz
+
+		fmt.Println("Start download from files.sa-mp.com...")
+		cmd = exec.Command("sh", "-c", "curl files.sa-mp.com/samp037svr_R2-1.tar.gz --output /tmp/samp037svr_R2-1.tar.gz")
+		cmd.Stdout = &out
+		cmd.Stderr = &stderr
+
+		cmd.Run()
+		cmd.Wait()
+
+		fmt.Println("Unpack samp037svr_R2-1.tar.gz to ~/servers/" + project_name + "...")
+		cmd = exec.Command("sh", "-c", "tar xzvf /tmp/samp037svr_R2-1.tar.gz -C /tmp")
+		cmd.Stdout = &out
+		cmd.Stderr = &stderr
+
+		cmd.Run()
+		cmd.Wait()
+
+		out.Reset()
+		stderr.Reset()
+
+		cmd = exec.Command("sh", "-c", "mv -f /tmp/samp03 /home/samp_servers/servers/"+project_name)
+		cmd.Stdout = &out
+		cmd.Stderr = &stderr
+
+		cmd.Run()
+		out.Reset()
+		stderr.Reset()
+
+		fmt.Println("Remove samp037svr_R2-1.tar.gz...")
+
+		cmd = exec.Command("sh", "-c", "rm -rf /tmp/samp037svr_R2-1.tar.gz")
+		cmd.Stdout = &out
+		cmd.Stderr = &stderr
+
+		cmd.Run()
+
+		out.Reset()
+		stderr.Reset()
+
+		scanner := bufio.NewScanner(os.Stdin)
+
+		fmt.Println("Input port server (1000 - 9999): ")
+
+		var port int
+
+		for scanner.Scan() {
+			if !IsInt(scanner.Text()) {
+				fmt.Println("Input port server (1000 - 9999): ")
+				continue
+			}
+			fmt.Sscan(scanner.Text(), &port)
+
+			if port > 9999 || port < 1000 {
+				fmt.Println("Input port server (1000 - 9999): ")
+			}
+			break
+		}
+
+		fmt.Println("Generate rcon password...")
+
+		rcon_password := GenerateRandomString(16)
+
+		fmt.Println("rcon password: ", rcon_password)
+
+		path_to_server_cfg := "/home/samp_servers/servers/" + project_name + "/server.cfg"
+		file, err := os.Open(path_to_server_cfg)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer file.Close()
+
+		b, err := ioutil.ReadAll(file)
+
+		cfg_content := string(b)
+		var re_cfg_port = regexp.MustCompile(`(?m)(port\s+)(\d+)`)
+
+		port_string := fmt.Sprintf("%d", port)
+		cfg_content = re_cfg_port.ReplaceAllString(cfg_content, "${1}"+port_string)
+
+		var re_cfg_rcon_password = regexp.MustCompile(`(?m)(rcon_password\s+)(changeme)`)
+		cfg_content = re_cfg_rcon_password.ReplaceAllString(cfg_content, "${1}"+rcon_password)
+		ioutil.WriteFile(path_to_server_cfg, []byte(cfg_content), 0644)
+
+		cmd = exec.Command("sh", "-c", "samp-srv "+project_name+" start")
+		cmd.Stdout = &out
+		cmd.Stderr = &stderr
+
+		cmd.Run()
+	default:
+		{
+			fmt.Println("Invalid command!")
+			return
+		}
+
 	}
+
+}
+func IsInt(s string) bool {
+	l := len(s)
+	if strings.HasPrefix(s, "-") {
+		l = l - 1
+		s = s[1:]
+	}
+
+	reg := fmt.Sprintf("\\d{%d}", l)
+
+	rs, err := regexp.MatchString(reg, s)
+
+	if err != nil {
+		return false
+	}
+
+	return rs
+}
+
+var src = rand.NewSource(time.Now().UnixNano())
+
+const (
+	letterBytes   = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	letterIdxBits = 6                    // 6 bits to represent a letter index
+	letterIdxMask = 1<<letterIdxBits - 1 // All 1-bits, as many as letterIdxBits
+	letterIdxMax  = 63 / letterIdxBits   // # of letter indices fitting in 63 bits
+)
+
+func GenerateRandomString(n int) string {
+	sb := strings.Builder{}
+	sb.Grow(n)
+	// A src.Int63() generates 63 random bits, enough for letterIdxMax characters!
+	for i, cache, remain := n-1, src.Int63(), letterIdxMax; i >= 0; {
+		if remain == 0 {
+			cache, remain = src.Int63(), letterIdxMax
+		}
+		if idx := int(cache & letterIdxMask); idx < len(letterBytes) {
+			sb.WriteByte(letterBytes[idx])
+			i--
+		}
+		cache >>= letterIdxBits
+		remain--
+	}
+
+	return sb.String()
 }
